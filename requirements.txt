@@ -1,0 +1,20 @@
+# Dependencias de ejecución.
+# Versiones fijadas: el objetivo del contenedor es reproducibilidad y paridad
+# con el runtime de Databricks. Un rango abierto rompe ambas cosas.
+
+# --- Spark y Delta Lake ---
+pyspark[sql]==4.1.1
+delta-spark==4.3.1
+
+# --- Generador de datos ---
+faker==40.38.0
+numpy==2.5.3
+pyarrow==25.0.1
+pandas==2.3.3
+
+# --- Modelo de fuga (fase opcional) ---
+scikit-learn==1.7.2
+
+# --- Configuración ---
+# Motor de reglas de calidad (rules.yml).
+pyyaml==6.0.3

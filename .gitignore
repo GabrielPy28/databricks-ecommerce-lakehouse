@@ -1,0 +1,37 @@
+# Credenciales y configuración local
+.env
+.databrickscfg
+
+# Datos generados. Nunca en el repositorio: son reproducibles con
+#   python -m ecommerce.generator.cli --profile dev --seed 42
+# y el generador es determinista, así que versionarlos solo añadiría megabytes
+# que cualquiera puede regenerar con un comando.
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Spark local
+spark-warehouse/
+metastore_db/
+derby.log
+checkpoints/
+
+# Databricks
+.databricks/
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,39 @@
+# Uso habitual:
+#   docker compose build
+#   docker compose run --rm dev pytest
+#   docker compose run --rm dev bash
+#
+# Se usa `run --rm` y no `up`: este servicio no es un demonio, es un entorno de
+# trabajo efímero.
+
+services:
+  dev:
+    build:
+      context: .
+      # La versión del CLI de Databricks se fija en el Dockerfile. No se
+      # repite aquí: pasar el argumento con valor vacío anularía ese valor por
+      # defecto y volvería a instalar "la última", que es justo lo que se
+      # quiere evitar.
+    image: ecommerce-lakehouse-dev
+    working_dir: /workspace
+    volumes:
+      # El código se monta, no se copia: editar en Windows se refleja al
+      # instante dentro del contenedor.
+      - .:/workspace
+      # Caché de Ivy en volumen con nombre. Sin esto, cualquier JAR adicional
+      # que Spark necesite se volvería a descargar en cada ejecución.
+      - ivy-cache:/root/.ivy2
+    env_file:
+      # Credenciales de Databricks. `required: false` permite trabajar en local
+      # sin haber creado todavía el .env.
+      - path: .env
+        required: false
+    environment:
+      # pytest ya añade src/ al path (pythonpath en pyproject.toml), pero esto
+      # hace que `python -m ecommerce...` también funcione en una shell suelta.
+      PYTHONPATH: /workspace/src
+    stdin_open: true
+    tty: true
+
+volumes:
+  ivy-cache:

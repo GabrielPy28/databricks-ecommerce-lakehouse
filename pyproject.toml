@@ -1,0 +1,53 @@
+[project]
+name = "ecommerce-lakehouse"
+version = "0.1.0"
+description = "Lakehouse end-to-end de e-commerce sobre Databricks (arquitectura Medallion)"
+requires-python = ">=3.12"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# `rules.yml` viaja dentro del paquete. Sin esto, el wheel se instala sin él y
+# `load_rules()` falla en el job con un fichero no encontrado, pese a que en
+# local funciona perfectamente porque ahí sí está en el árbol de fuentes.
+ecommerce = ["quality/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Añade src/ al path de importación sin necesidad de instalar el paquete.
+# Evita tener que ejecutar `pip install -e .` dentro del contenedor cada vez.
+pythonpath = ["src"]
+addopts = "-ra --strict-markers"
+markers = [
+    "spark: test que requiere una sesión de Spark (lento, decenas de segundos)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "scripts"]
+# ruff también formatea los bloques ```python dentro de ficheros Markdown. En
+# la documentación eso es contraproducente: los ejemplos están escritos para
+# leerse, no para cumplir el formateador.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort: orden de imports
+    "UP",   # pyupgrade: sintaxis moderna
+    "B",    # bugbear: errores sutiles frecuentes
+    "SIM",  # simplify
+    "RUF",  # reglas propias de ruff
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Los notebooks de Databricks usan celdas y variables mágicas (dbutils, spark)
+# que no están definidas en el fichero.
+"notebooks/*" = ["E402", "F821"]

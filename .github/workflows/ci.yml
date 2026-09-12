@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Lint y tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # CI construye y usa la MISMA imagen que el desarrollo local, en lugar de
+      # instalar Python y Java por separado. Cuesta algo más de tiempo, pero
+      # verifica el Dockerfile y elimina la clase de fallos "en mi máquina funciona".
+      - name: Construir imagen de desarrollo
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ecommerce-lakehouse-dev:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Lint
+        run: docker run --rm -v "$PWD:/workspace" ecommerce-lakehouse-dev:ci ruff check .
+
+      - name: Formato
+        run: docker run --rm -v "$PWD:/workspace" ecommerce-lakehouse-dev:ci ruff format --check .
+
+      # No se necesitan credenciales de Databricks: todo lo que corre aquí es
+      # local. Incluye `tests/test_bundle.py`, que comprueba la estructura del
+      # DAG —notebooks referenciados, dependencias, parámetros— sin workspace.
+      - name: Tests
+        run: docker run --rm -v "$PWD:/workspace" ecommerce-lakehouse-dev:ci pytest -v
+
+  bundle:
+    name: Validar Asset Bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # `databricks bundle validate` resuelve el usuario del workspace para
+    # prefijar los recursos en modo desarrollo, así que necesita credenciales.
+    # El job se salta solo cuando el secreto no está configurado, para que un
+    # fork o un clon recién hecho no vea CI en rojo por algo que no puede tener.
+    #
+    # La estructura del DAG ya se comprueba sin credenciales en el job anterior;
+    # esto añade la validación remota del esquema del bundle.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Validar
+        if: env.DATABRICKS_TOKEN != ''
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate --target dev
+
+      - name: Aviso si no hay credenciales
+        if: env.DATABRICKS_TOKEN == ''
+        env:
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          echo "::notice::Sin DATABRICKS_TOKEN configurado: se omite la validación remota del bundle."
+          echo "La estructura del DAG ya se verifica en tests/test_bundle.py, que no necesita credenciales."

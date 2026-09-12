@@ -1,0 +1,24 @@
+# Reduce el contexto de construcción. Solo se copian requirements*.txt, pero un
+# contexto grande ralentiza cada `docker build` aunque no se use.
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.databricks/
+data/
+spark-warehouse/
+metastore_db/
+derby.log
+checkpoints/
+# Artefactos de construcción del wheel
+dist/
+build/
+
+docs/
+notebooks/
+.env
+*.md
