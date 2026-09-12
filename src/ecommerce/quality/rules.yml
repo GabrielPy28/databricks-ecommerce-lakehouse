@@ -1,0 +1,128 @@
+# Reglas de calidad del proyecto.
+#
+# Severidades:
+#   warn        registra el incumplimiento y deja pasar la fila
+#   quarantine  aparta la fila y la conserva junto con el motivo
+#   fail        detiene el pipeline entero
+#
+# Casi todas las reglas miran fila a fila. `row_count_delta` es la excepción:
+# mira la tabla entera y detecta lo que ninguna regla por fila puede ver, que
+# **falten** datos. Una fila ausente no incumple nada —simplemente no está—, así
+# que un pipeline que un día ingiere una fracción de lo habitual pasa todas las
+# validaciones y publica cifras silenciosamente incompletas.
+#
+# Criterio para elegirla: `fail` se reserva para lo que invalida la tabla
+# completa —una clave primaria nula o repetida—, porque seguir adelante
+# produciría agregados sin sentido. Lo que ensucia filas concretas va a
+# `quarantine`. Lo que merece una mirada pero no impide usar el dato, a `warn`.
+
+# `customers` y `products` son dimensiones historificadas (SCD Tipo 2): la
+# clave de negocio aparece una vez por versión. Por eso la unicidad incluye
+# `updated_at`. Comprobando solo la clave, cada fila con historial se marcaría
+# como duplicada y el historial haría fallar su propia validación.
+silver.customers:
+  # Un salto de volumen apunta a un lote duplicado; una caída, a datos
+  # perdidos. Severidad `warn`: sin conocer la causa, detener el pipeline
+  # sería tan arriesgado como dejarlo pasar.
+  - {rule: row_count_delta, max_pct: 10, severity: warn}
+  - {column: customer_id, rule: not_null, severity: fail}
+  - {column: customer_id, rule: unique, with: [updated_at], severity: fail}
+  # El correo malformado no impide analizar al cliente: se avisa y se sigue.
+  - {column: email, rule: matches, pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$', severity: warn}
+  - {column: country, rule: not_null, severity: warn}
+
+silver.products:
+  # Un salto de volumen apunta a un lote duplicado; una caída, a datos
+  # perdidos. Severidad `warn`: sin conocer la causa, detener el pipeline
+  # sería tan arriesgado como dejarlo pasar.
+  - {rule: row_count_delta, max_pct: 10, severity: warn}
+  - {column: product_id, rule: not_null, severity: fail}
+  - {column: product_id, rule: unique, with: [updated_at], severity: fail}
+  - {column: price, rule: min_value, value: 0, severity: quarantine}
+  - {column: cost, rule: min_value, value: 0, severity: quarantine}
+  - {column: category, rule: not_null, severity: warn}
+
+silver.orders:
+  # Un salto de volumen apunta a un lote duplicado; una caída, a datos
+  # perdidos. Severidad `warn`: sin conocer la causa, detener el pipeline
+  # sería tan arriesgado como dejarlo pasar.
+  - {rule: row_count_delta, max_pct: 30, severity: warn}
+  - {column: order_id, rule: not_null, severity: fail}
+  - {column: order_id, rule: unique, severity: fail}
+  - {column: customer_id, rule: not_null, severity: quarantine}
+  # Detecta los identificadores de cliente que no existen. Es la anomalía que
+  # el tipado no ve: un huérfano es una cadena perfectamente válida.
+  - {column: customer_id, rule: foreign_key, ref: silver.customers, severity: quarantine}
+  - {column: order_date, rule: not_null, severity: quarantine}
+  - column: status
+    rule: in_set
+    values: [pending, paid, shipped, delivered, cancelled, returned]
+    severity: quarantine
+  - {column: total_amount, rule: min_value, value: 0, severity: quarantine}
+  - {column: gross_amount, rule: min_value, value: 0, severity: quarantine}
+  - {column: discount_amount, rule: min_value, value: 0, severity: quarantine}
+
+silver.order_items:
+  # Un salto de volumen apunta a un lote duplicado; una caída, a datos
+  # perdidos. Severidad `warn`: sin conocer la causa, detener el pipeline
+  # sería tan arriesgado como dejarlo pasar.
+  - {rule: row_count_delta, max_pct: 30, severity: warn}
+  - {column: order_item_id, rule: not_null, severity: fail}
+  - {column: order_item_id, rule: unique, severity: fail}
+  - {column: order_id, rule: foreign_key, ref: silver.orders, severity: quarantine}
+  - {column: product_id, rule: foreign_key, ref: silver.products, severity: quarantine}
+  # Una cantidad no positiva rompe cualquier agregado de unidades vendidas.
+  - {column: quantity, rule: min_value, value: 1, severity: quarantine}
+  - {column: unit_price, rule: min_value, value: 0, severity: quarantine}
+  - {column: line_total, rule: min_value, value: 0, severity: quarantine}
+
+silver.payments:
+  - {column: payment_id, rule: not_null, severity: fail}
+  - {column: payment_id, rule: unique, severity: fail}
+  - {column: order_id, rule: foreign_key, ref: silver.orders, severity: quarantine}
+  - column: payment_status
+    rule: in_set
+    values: [pending, completed, failed, refunded]
+    severity: quarantine
+  - {column: amount, rule: min_value, value: 0, severity: quarantine}
+
+silver.reviews:
+  - {column: review_id, rule: not_null, severity: fail}
+  - {column: review_id, rule: unique, severity: fail}
+  - {column: order_id, rule: foreign_key, ref: silver.orders, severity: quarantine}
+  - {column: rating, rule: min_value, value: 1, severity: quarantine}
+  - {column: rating, rule: max_value, value: 5, severity: quarantine}
+
+silver.returns:
+  - {column: return_id, rule: not_null, severity: fail}
+  - {column: return_id, rule: unique, severity: fail}
+  - {column: order_item_id, rule: foreign_key, ref: silver.order_items, severity: quarantine}
+  - {column: quantity, rule: min_value, value: 1, severity: quarantine}
+  - {column: refund_amount, rule: min_value, value: 0, severity: quarantine}
+
+silver.web_events:
+  # Un salto de volumen apunta a un lote duplicado; una caída, a datos
+  # perdidos. Severidad `warn`: sin conocer la causa, detener el pipeline
+  # sería tan arriesgado como dejarlo pasar.
+  - {rule: row_count_delta, max_pct: 40, severity: warn}
+  - {column: event_id, rule: not_null, severity: fail}
+  - {column: event_id, rule: unique, severity: fail}
+  - {column: session_id, rule: not_null, severity: quarantine}
+  - column: event_type
+    rule: in_set
+    values: [page_view, add_to_cart, checkout_start, purchase]
+    severity: quarantine
+  # `customer_id` NO se comprueba: la mayor parte del tráfico es anónimo y
+  # exigirlo marcaría como error el comportamiento normal del sitio.
+  - {column: event_timestamp, rule: not_null, severity: quarantine}
+  # Ver la portada es un evento sin producto, pero los otros tres pasos del
+  # embudo no pueden carecer de él: una compra sin producto es un dato
+  # imposible que contaminaría `product_performance`.
+  #
+  # Sin `where` esta regla no se puede expresar: `product_id` admite nulos en
+  # general, así que o no se comprueba —como ocurría— o se marcarían como error
+  # todas las vistas de portada.
+  - column: product_id
+    rule: not_null
+    where: "event_type != 'page_view'"
+    severity: quarantine
