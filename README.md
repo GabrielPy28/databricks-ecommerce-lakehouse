@@ -1,5 +1,9 @@
 # Databricks E-Commerce Lakehouse
 
+[![CI](https://github.com/GabrielPy28/databricks-ecommerce-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/GabrielPy28/databricks-ecommerce-lakehouse/actions/workflows/ci.yml)
+
+*Español · [English](README.en.md)*
+
 Lakehouse end-to-end para una plataforma de e-commerce, construido sobre
 Databricks Free Edition con arquitectura Medallion, procesamiento incremental,
 calidad de datos como código y orquestación versionada.
@@ -40,6 +44,35 @@ aparecen días después de haber ocurrido.
 El pipeline tiene que producir cifras en las que el negocio confíe, y tiene que
 seguir haciéndolo cuando se reejecuta, cuando llega un dato tardío y cuando un
 extracto viene corrupto.
+
+---
+
+## El resultado
+
+Dashboard AI/BI de Databricks, definido como código en
+[`dashboards/`](dashboards/) y desplegado por el mismo bundle que el pipeline.
+Todas las cifras salen de las tablas `gold`.
+
+![KPIs e ingreso diario](docs/img/dashboard-top.png)
+
+Ingreso neto acumulado, órdenes con ingreso reconocido y clientes con al menos
+una compra, sobre 24 meses de histórico. *El pico del último día es el lote
+incremental: sus 153 órdenes llevan la fecha de referencia del generador, frente
+a las ~13 de un día cualquiera del histórico.*
+
+![Países, segmentos RFM y productos](docs/img/dashboard-middle.png)
+
+Ingreso por país, segmentación RFM de la base de clientes y los 20 productos de
+mayor ingreso. El margen de cada producto se calcula con el **coste vigente en
+la fecha de cada venta**, tomado del historial SCD2: es donde esa inversión
+rinde.
+
+![Embudo de marketing y calidad de datos](docs/img/dashboard-bottom.png)
+
+El embudo cuenta **sesiones, no eventos**. Y el dashboard incluye su propia
+calidad de datos: qué reglas se incumplieron en la última ejecución, con cuántas
+filas y con qué severidad. Una cifra de negocio sin su calidad al lado obliga a
+confiar a ciegas.
 
 ---
 
@@ -487,7 +520,9 @@ Decisiones deliberadas, no omisiones:
 - **El modelo no se registra ni se sirve.** No hay MLflow Model Registry ni
   endpoint de inferencia: la fase de ML existe para demostrar que la capa Gold
   alimenta un caso de uso real, no para montar una plataforma de MLOps.
-- **Rendimiento medido en bytes y ficheros leídos, no en tiempo de reloj.** En
-  serverless no se controla el cómputo, así que el tiempo mide sobre todo el
-  ruido de la plataforma.
+- **Rendimiento medido en layout físico, no en tiempo de reloj ni en bytes
+  leídos.** En serverless no se controla el cómputo, así que el tiempo mide
+  sobre todo el ruido de la plataforma; y los bytes leídos los falsean la caché
+  de disco y la latencia de `system.query.history`. El número de ficheros y su
+  tamaño medio no dependen de ninguna de las dos cosas.
 - **Datos 100 % sintéticos.** Ninguna información personal real.
