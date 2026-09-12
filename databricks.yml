@@ -1,0 +1,269 @@
+# Databricks Asset Bundle: el pipeline como código.
+#
+# Un Workflow creado clicando en la interfaz no deja rastro en el repositorio:
+# no se puede revisar en un pull request, no se puede reconstruir si alguien lo
+# borra y no hay forma de saber quién cambió qué. Aquí el DAG, sus parámetros y
+# su planificación viven versionados junto al código que ejecutan.
+#
+# Uso:
+#   databricks bundle validate
+#   databricks bundle deploy --target dev
+#   databricks bundle run ecommerce_pipeline --target dev
+#
+# Las credenciales salen de DATABRICKS_HOST y DATABRICKS_TOKEN, que
+# docker-compose inyecta desde .env. Por eso no aparece ningún host en este
+# fichero: un workspace codificado aquí ataría el repositorio a una cuenta
+# concreta.
+
+bundle:
+  name: ecommerce-lakehouse
+
+# El código de `src/` viaja a los jobs como wheel, no como ficheros sueltos que
+# los notebooks añaden al `sys.path`. Así las tareas dependen de una versión
+# concreta del paquete —con `rules.yml` dentro— en lugar de un directorio que
+# resulte estar al lado.
+artifacts:
+  paquete:
+    type: whl
+    path: .
+    build: python -m build --wheel
+
+# Al workspace solo viaja lo que los jobs ejecutan. `src/` queda fuera a
+# propósito: ya va dentro del wheel, y sincronizarlo además dejaría una segunda
+# copia sin versionar que un notebook podría importar por accidente, con el
+# resultado de que el job correría con un código distinto del desplegado.
+sync:
+  exclude:
+    - src/**
+    - tests/**
+    - data/**
+    - docs/**
+    - scripts/**
+
+variables:
+  catalog:
+    description: Catálogo de Unity Catalog sobre el que opera el pipeline.
+    default: ecommerce
+  scale_profile:
+    description: Perfil de escala del generador (dev, demo, full).
+    default: dev
+  schedule_status:
+    description: >-
+      PAUSED o UNPAUSED. Por defecto en pausa: un job que se activa solo
+      consume cuota de Free Edition sin que nadie esté mirando el resultado.
+      Para activarlo en desarrollo:
+        databricks bundle deploy --target dev --var schedule_status=UNPAUSED
+    default: PAUSED
+  schedule_cron:
+    description: >-
+      Expresión cron de Quartz (segundo minuto hora día-mes mes día-semana).
+      Por defecto, todos los días a las 06:00.
+    default: "0 0 6 * * ?"
+  schedule_timezone:
+    description: Zona horaria de la planificación.
+    default: UTC
+  warehouse_id:
+    description: >-
+      SQL Warehouse que ejecuta las consultas del dashboard. Se resuelve por
+      nombre en el despliegue en lugar de codificar un identificador, que es
+      distinto en cada workspace y ataría el repositorio a esta cuenta.
+    lookup:
+      warehouse: Serverless Starter Warehouse
+  prod_root_path:
+    description: >-
+      Ruta de despliegue en producción. En una organización real debería ser
+      una carpeta restringida propiedad de un service principal, no una
+      compartida con todo el workspace.
+    default: /Workspace/Shared/.bundle/ecommerce-lakehouse/prod
+
+targets:
+  # Desarrollo. `mode: development` prefija los recursos con el usuario, deja
+  # las planificaciones en pausa y permite sobrescribir el despliegue sin
+  # ceremonia: es lo que evita que dos personas trabajando a la vez se pisen
+  # los jobs.
+  dev:
+    mode: development
+    default: true
+
+  # Producción. `mode: production` exige una ruta de despliegue explícita y
+  # compartida: impide que el pipeline productivo acabe colgando de la carpeta
+  # personal de quien lo desplegó, que desaparecería con esa cuenta.
+  #
+  # La ruta por defecto es `/Workspace/Shared`, y el CLI avisa —con razón— de
+  # que ahí pueden escribir todos los usuarios del workspace. En una
+  # organización real esto apuntaría a una carpeta restringida propiedad de un
+  # service principal; Free Edition no los ofrece y solo hay una cuenta, así
+  # que el aviso se deja visible en lugar de silenciarlo concediendo permisos
+  # amplios para que no moleste.
+  prod:
+    mode: production
+    workspace:
+      root_path: ${var.prod_root_path}
+    variables:
+      scale_profile: demo
+      # En producción la planificación sí está activa: es lo que distingue un
+      # pipeline que corre solo de uno que alguien tiene que lanzar.
+      schedule_status: UNPAUSED
+
+resources:
+  # El dashboard también es código. Su definición —consultas, widgets y
+  # disposición— vive en el repositorio, así que se puede revisar en un pull
+  # request y reconstruir si alguien lo borra, igual que el job.
+  dashboards:
+    ecommerce_overview:
+      display_name: E-Commerce Lakehouse - Overview
+      file_path: ./dashboards/ecommerce_overview.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+
+  jobs:
+    ecommerce_pipeline:
+      name: ecommerce-lakehouse
+      description: >-
+        Medallion end-to-end: ingesta a Bronze con Auto Loader, tipado y
+        cuarentena en Silver, puerta de calidad y construcción de Gold.
+
+      # Parámetros del job, no de cada tarea.
+      #
+      # Ya no hay parámetro de lote: Auto Loader ingiere todos los ficheros
+      # nuevos que encuentre, así que el lote es una propiedad del dato —se
+      # deduce de la ruta del fichero— y no de la invocación. Lo que sí
+      # comparten todas las tareas es el identificador de ejecución, que es lo
+      # que hace rastreable una corrida completa.
+      parameters:
+        - name: entities
+          default: customers,products,orders,order_items,payments,reviews,returns,web_events
+
+      # Ejecución diaria, que es la cadencia que el generador modela: cada lote
+      # incremental cubre un día.
+      #
+      # Nota sobre Free Edition: `mode: development` pausa las planificaciones
+      # automáticamente, pero aquí se declara el estado de forma explícita en
+      # lugar de confiar en ese comportamiento. Un job que se activa por un
+      # efecto colateral del modo de despliegue es un job que nadie recuerda
+      # haber encendido.
+      schedule:
+        quartz_cron_expression: ${var.schedule_cron}
+        timezone_id: ${var.schedule_timezone}
+        pause_status: ${var.schedule_status}
+
+      # Una sola notificación por fallo del job entero, no una por tarea.
+      email_notifications:
+        on_failure: []
+
+      # Sin reintentos automáticos en el pipeline de datos: reintentar a ciegas
+      # una tarea que falló por datos malos solo repite el fallo y oculta la
+      # causa. La puerta de calidad existe precisamente para detenerse.
+      max_concurrent_runs: 1
+
+      # Entorno serverless compartido: el wheel se instala una vez y todas las
+      # tareas lo usan.
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - ./dist/*.whl
+
+      tasks:
+        - task_key: ingest_bronze
+          description: Auto Loader desde el Volume de aterrizaje. Idempotente por checkpoint.
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/01_bronze_ingestion.py
+            base_parameters:
+              # El identificador de la ejecución del job se propaga a todas las
+              # tareas: enlaza cada fila de Bronze con la corrida que la
+              # escribió, con sus resultados de calidad y con la ventana que
+              # Gold recalcula.
+              run_id: "{{job.run_id}}"
+
+        - task_key: build_silver
+          description: Tipado con try_cast, cuarentena, reglas de calidad, MERGE y SCD2.
+          depends_on:
+            - task_key: ingest_bronze
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/02_silver_transformation.py
+            base_parameters:
+              entities: "{{job.parameters.entities}}"
+              run_id: "{{job.run_id}}"
+
+        - task_key: quality_gate
+          description: >-
+            Publica el reporte y detiene el pipeline si se incumple una regla de
+            severidad `fail`. Es la razón de que sea una tarea aparte.
+          depends_on:
+            - task_key: build_silver
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/03_data_quality.py
+            base_parameters:
+              run_id: "{{job.run_id}}"
+
+        - task_key: build_gold
+          description: Recarga de daily_sales solo en la ventana que el lote afecta.
+          # Depende de la puerta, no de Silver: si la calidad falla, Gold no
+          # llega a publicar cifras construidas sobre datos que no cumplen lo
+          # mínimo.
+          depends_on:
+            - task_key: quality_gate
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/04_gold_analytics.py
+            base_parameters:
+              # La ventana a recalcular sale de lo que esta ejecución ingirió,
+              # no de una etiqueta de lote: una corrida puede arrastrar varios
+              # lotes a la vez.
+              run_id: "{{job.run_id}}"
+
+    # Predicción de fuga. Job aparte y sin planificación: es una fase opcional
+    # que **consume** Gold y no forma parte del camino crítico del pipeline. Si
+    # el modelo falla, las tablas de negocio siguen publicándose.
+    #
+    #   databricks bundle run churn_model --target dev
+    churn_model:
+      name: ecommerce-lakehouse-churn
+      description: >-
+        Entrena tres algoritmos con validación fuera de tiempo, los compara con
+        la regla trivial de recencia y publica probabilidades de fuga.
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - ./dist/*.whl
+              # Solo este job la necesita. Declararla en el entorno del pipeline
+              # diario alargaría el arranque de cuatro tareas para nada.
+              - scikit-learn==1.7.2
+
+      tasks:
+        - task_key: churn
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/05_ml_churn.py
+
+    # Demostración de recuperación con time travel. Job aparte y sin
+    # planificación: es **destructiva por diseño** —rompe `gold.daily_sales`
+    # para enseñar cómo se recupera— y no tiene nada que hacer en el pipeline
+    # diario. Se ejecuta a mano:
+    #
+    #   databricks bundle run time_travel_demo --target dev
+    time_travel_demo:
+      name: ecommerce-lakehouse-time-travel
+      description: >-
+        Rompe gold.daily_sales a propósito, demuestra que el job termina con
+        éxito publicando una cifra incorrecta, y la recupera con RESTORE.
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "3"
+            dependencies:
+              - ./dist/*.whl
+
+      tasks:
+        - task_key: demo
+          environment_key: default
+          notebook_task:
+            notebook_path: ./notebooks/99_time_travel_demo.py
