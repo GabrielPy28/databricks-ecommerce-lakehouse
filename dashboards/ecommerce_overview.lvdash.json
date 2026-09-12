@@ -1,0 +1,1167 @@
+{
+  "datasets": [
+    {
+      "name": "ds_kpis",
+      "displayName": "KPIs de cabecera",
+      "queryLines": [
+        "SELECT\n",
+        "    sum(net_revenue)                   AS ingreso_neto,\n",
+        "    sum(orders)                        AS ordenes,\n",
+        "    round(avg(average_order_value), 2) AS ticket_medio,\n",
+        "    (SELECT count(*) FROM ecommerce.gold.customer_lifetime_value) AS clientes\n",
+        "FROM ecommerce.gold.daily_sales\n"
+      ]
+    },
+    {
+      "name": "ds_daily",
+      "displayName": "Ingreso diario",
+      "queryLines": [
+        "SELECT date, net_revenue, orders, customers\n",
+        "FROM ecommerce.gold.daily_sales\n",
+        "ORDER BY date\n"
+      ]
+    },
+    {
+      "name": "ds_country",
+      "displayName": "Ingreso por país",
+      "queryLines": [
+        "SELECT country, sum(total_spend) AS ingreso, count(*) AS clientes\n",
+        "FROM ecommerce.gold.customer_lifetime_value\n",
+        "WHERE country IS NOT NULL\n",
+        "GROUP BY country\n",
+        "ORDER BY ingreso DESC\n"
+      ]
+    },
+    {
+      "name": "ds_segments",
+      "displayName": "Segmentos RFM",
+      "queryLines": [
+        "SELECT segment, count(*) AS clientes, round(sum(total_spend), 2) AS ingreso\n",
+        "FROM ecommerce.gold.customer_segments\n",
+        "GROUP BY segment\n",
+        "ORDER BY ingreso DESC\n"
+      ]
+    },
+    {
+      "name": "ds_products",
+      "displayName": "Productos por ingreso",
+      "queryLines": [
+        "SELECT product_name, category, units_sold, revenue, profit,\n",
+        "       round(margin_pct, 1) AS margen_pct, round(return_rate, 1) AS devolucion_pct\n",
+        "FROM ecommerce.gold.product_performance\n",
+        "ORDER BY revenue DESC\n",
+        "LIMIT 20\n"
+      ]
+    },
+    {
+      "name": "ds_funnel",
+      "displayName": "Embudo por canal",
+      "queryLines": [
+        "SELECT channel,\n",
+        "       sum(page_views)   AS visitas,\n",
+        "       sum(add_to_carts) AS al_carrito,\n",
+        "       sum(checkouts)    AS inicio_pago,\n",
+        "       sum(purchases)    AS compras,\n",
+        "       round(100.0 * sum(purchases) / nullif(sum(page_views), 0), 2) AS conversion_pct\n",
+        "FROM ecommerce.gold.marketing_funnel\n",
+        "GROUP BY channel\n",
+        "ORDER BY visitas DESC\n"
+      ]
+    },
+    {
+      "name": "ds_quality",
+      "displayName": "Calidad de la última ejecución",
+      "queryLines": [
+        "WITH ultima AS (\n",
+        "    SELECT run_id FROM ecommerce.ops.quality_results\n",
+        "    ORDER BY checked_at DESC LIMIT 1\n",
+        ")\n",
+        "SELECT table AS tabla, column AS columna, rule AS regla, severity AS severidad,\n",
+        "       rows_checked AS filas, rows_failed AS incumplen, round(pass_rate, 2) AS pct_ok\n",
+        "FROM ecommerce.ops.quality_results\n",
+        "WHERE run_id = (SELECT run_id FROM ultima) AND rows_failed > 0\n",
+        "ORDER BY rows_failed DESC\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "pg_overview",
+      "displayName": "E-Commerce Overview",
+      "layout": [
+        {
+          "widget": {
+            "name": "w_intro",
+            "textbox_spec": "# E-Commerce Lakehouse\n\nArquitectura Medallion sobre Databricks. Todas las cifras provienen de las tablas `gold`, reconstruidas por el pipeline orquestado `ecommerce-lakehouse`."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "w_revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis",
+                  "fields": [
+                    {
+                      "name": "ingreso_neto",
+                      "expression": "`ingreso_neto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ingreso_neto",
+                  "displayName": "Ingreso neto"
+                }
+              },
+              "frame": {
+                "title": "Ingreso neto",
+                "showTitle": true,
+                "description": "Suma de ventas con ingreso reconocido",
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_orders",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis",
+                  "fields": [
+                    {
+                      "name": "ordenes",
+                      "expression": "`ordenes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "ordenes",
+                  "displayName": "Órdenes"
+                }
+              },
+              "frame": {
+                "title": "Órdenes",
+                "showTitle": true,
+                "description": "Órdenes pagadas, enviadas o entregadas",
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_customers",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_kpis",
+                  "fields": [
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "clientes",
+                  "displayName": "Clientes con compras"
+                }
+              },
+              "frame": {
+                "title": "Clientes con compras",
+                "showTitle": true,
+                "description": "Clientes con al menos una orden válida",
+                "showDescription": true
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "w_daily_line",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    },
+                    {
+                      "name": "net_revenue",
+                      "expression": "`net_revenue`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Fecha"
+                },
+                "y": {
+                  "fieldName": "net_revenue",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Ingreso neto"
+                }
+              },
+              "frame": {
+                "title": "Ingreso neto por día",
+                "showTitle": true,
+                "description": "",
+                "showDescription": false
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "w_country_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_country",
+                  "fields": [
+                    {
+                      "name": "ingreso",
+                      "expression": "`ingreso`"
+                    },
+                    {
+                      "name": "country",
+                      "expression": "`country`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ingreso",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Ingreso"
+                },
+                "y": {
+                  "fieldName": "country",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "País"
+                }
+              },
+              "frame": {
+                "title": "Ingreso por país",
+                "showTitle": true,
+                "description": "",
+                "showDescription": false
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "w_segments_bar",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_segments",
+                  "fields": [
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    },
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "clientes",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clientes"
+                },
+                "y": {
+                  "fieldName": "segment",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Segmento RFM"
+                }
+              },
+              "frame": {
+                "title": "Base de clientes por segmento",
+                "showTitle": true,
+                "description": "",
+                "showDescription": false
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 12,
+            "width": 3,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "w_products_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_products",
+                  "fields": [
+                    {
+                      "name": "product_name",
+                      "expression": "`product_name`"
+                    },
+                    {
+                      "name": "category",
+                      "expression": "`category`"
+                    },
+                    {
+                      "name": "units_sold",
+                      "expression": "`units_sold`"
+                    },
+                    {
+                      "name": "revenue",
+                      "expression": "`revenue`"
+                    },
+                    {
+                      "name": "profit",
+                      "expression": "`profit`"
+                    },
+                    {
+                      "name": "margen_pct",
+                      "expression": "`margen_pct`"
+                    },
+                    {
+                      "name": "devolucion_pct",
+                      "expression": "`devolucion_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "product_name",
+                    "displayName": "Producto",
+                    "title": "Producto",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 0,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "category",
+                    "displayName": "Categoría",
+                    "title": "Categoría",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 1,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "units_sold",
+                    "displayName": "Unidades",
+                    "title": "Unidades",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 2,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "revenue",
+                    "displayName": "Ingreso",
+                    "title": "Ingreso",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 3,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "profit",
+                    "displayName": "Margen",
+                    "title": "Margen",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 4,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "margen_pct",
+                    "displayName": "% margen",
+                    "title": "% margen",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 5,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "devolucion_pct",
+                    "displayName": "% devolución",
+                    "title": "% devolución",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 6,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Top 20 productos por ingreso",
+                "showTitle": true,
+                "description": "Coste valorado al vigente en la fecha de cada venta",
+                "showDescription": true
+              },
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "w_funnel_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_funnel",
+                  "fields": [
+                    {
+                      "name": "channel",
+                      "expression": "`channel`"
+                    },
+                    {
+                      "name": "visitas",
+                      "expression": "`visitas`"
+                    },
+                    {
+                      "name": "al_carrito",
+                      "expression": "`al_carrito`"
+                    },
+                    {
+                      "name": "inicio_pago",
+                      "expression": "`inicio_pago`"
+                    },
+                    {
+                      "name": "compras",
+                      "expression": "`compras`"
+                    },
+                    {
+                      "name": "conversion_pct",
+                      "expression": "`conversion_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "channel",
+                    "displayName": "Canal",
+                    "title": "Canal",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 0,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "visitas",
+                    "displayName": "Visitas",
+                    "title": "Visitas",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 1,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "al_carrito",
+                    "displayName": "Al carrito",
+                    "title": "Al carrito",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 2,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "inicio_pago",
+                    "displayName": "Inició pago",
+                    "title": "Inició pago",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 3,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "compras",
+                    "displayName": "Compras",
+                    "title": "Compras",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 4,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "conversion_pct",
+                    "displayName": "% conversión",
+                    "title": "% conversión",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 5,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Embudo por canal de adquisición",
+                "showTitle": true,
+                "description": "Sesiones, no eventos: tres vistas de la misma visita son una visita",
+                "showDescription": true
+              },
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 27,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "w_quality_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_quality",
+                  "fields": [
+                    {
+                      "name": "tabla",
+                      "expression": "`tabla`"
+                    },
+                    {
+                      "name": "columna",
+                      "expression": "`columna`"
+                    },
+                    {
+                      "name": "regla",
+                      "expression": "`regla`"
+                    },
+                    {
+                      "name": "severidad",
+                      "expression": "`severidad`"
+                    },
+                    {
+                      "name": "filas",
+                      "expression": "`filas`"
+                    },
+                    {
+                      "name": "incumplen",
+                      "expression": "`incumplen`"
+                    },
+                    {
+                      "name": "pct_ok",
+                      "expression": "`pct_ok`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "tabla",
+                    "displayName": "Tabla",
+                    "title": "Tabla",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 0,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "columna",
+                    "displayName": "Columna",
+                    "title": "Columna",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 1,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "regla",
+                    "displayName": "Regla",
+                    "title": "Regla",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 2,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "severidad",
+                    "displayName": "Severidad",
+                    "title": "Severidad",
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left",
+                    "order": 3,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "filas",
+                    "displayName": "Filas",
+                    "title": "Filas",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 4,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "incumplen",
+                    "displayName": "Incumplen",
+                    "title": "Incumplen",
+                    "type": "integer",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 5,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  },
+                  {
+                    "fieldName": "pct_ok",
+                    "displayName": "% OK",
+                    "title": "% OK",
+                    "type": "float",
+                    "displayAs": "number",
+                    "alignContent": "right",
+                    "order": 6,
+                    "visible": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "numberFormat": ""
+                  }
+                ]
+              },
+              "frame": {
+                "title": "Calidad de datos: reglas incumplidas en la última ejecución",
+                "showTitle": true,
+                "description": "Vacío significa que ninguna regla se incumplió",
+                "showDescription": true
+              },
+              "allowHTMLByDefault": false,
+              "condensed": true,
+              "invisibleColumns": [],
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 34,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ]
+    }
+  ]
+}
